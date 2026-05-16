@@ -132,3 +132,17 @@ def parse_batch(raw: bytes) -> list[tuple[str, any]]:
         return results
     except Exception as exc:
         raise ValueError(f"Malformed batch message: {exc}") from exc
+
+
+def parse_binary_put(raw: bytes) -> tuple[str, bytes]:
+    """Parse a single binary PUT message: Header (JSON) + \0 + Body."""
+    try:
+        header_end = raw.index(b"\0")
+        header = json.loads(raw[:header_end].decode())
+        if header.get("type") != "put":
+            raise ValueError("Not a put message")
+        rel_path = header.get("path")
+        data = raw[header_end + 1:]
+        return rel_path, data
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"Malformed binary put: {exc}") from exc
