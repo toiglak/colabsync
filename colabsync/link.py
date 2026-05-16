@@ -109,10 +109,14 @@ def encode(tunnel_url: str, secret: bytes) -> str:
     # 1. Shorten the URL string
     short_url = _shorten_url(tunnel_url)
 
-    # 2. Pack as: [compressed_url_bytes] + [raw_secret_bytes]
-    compressed = zlib.compress(short_url.encode())
-    payload = compressed + secret
-    b64 = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+    # 2. Pack as: [4_bytes_secret] + [short_url_bytes]
+    # Then compress the whole thing.
+    if len(secret) != 4:
+        raise ValueError("Secret must be exactly 4 bytes")
+    data = secret + short_url.encode()
+    compressed = zlib.compress(data)
+    
+    b64 = base64.urlsafe_b64encode(compressed).rstrip(b"=").decode()
     return PREFIX + b64
 
 
@@ -134,15 +138,14 @@ def decode(link: str) -> tuple[str, bytes]:
     except Exception as exc:
         raise ValueError(f"Could not decode join link: {exc}") from exc
 
-    # Payload is: [zlib_compressed_url] + [4_bytes_secret]
-    if len(b64_decoded) < 4:
-        raise ValueError("Join link payload too short")
-        
-    secret = b64_decoded[-4:]
-    compressed_url = b64_decoded[:-4]
-
     try:
-        url_part = zlib.decompress(compressed_url).decode()
+        decompressed = zlib.decompress(b64_decoded)
+        if len(decompressed) < 4:
+            raise ValueError("Decompressed payload too short")
+            
+        secret = decompressed[:4]
+        url_part = decompressed[4:].decode()
+        
         # Expand back to original URL
         tunnel_url = _expand_url(url_part)
         

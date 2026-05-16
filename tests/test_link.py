@@ -77,16 +77,16 @@ def test_different_protocols():
 
 def test_no_subdomain():
     url = "wss://localhost"
-    secret = b"local"
+    secret = b"loca"  # Must be 4 bytes
     encoded = link.encode(url, secret)
     decoded_url, decoded_secret = link.decode(encoded)
     assert decoded_url == url
+    assert decoded_secret == secret
 
 def test_invalid_link():
     with pytest.raises(ValueError, match="Not a valid colabsync join link"):
         link.decode("invalid_link")
     
-    # Very short or non-base64 characters usually result in "too short" 
-    # because base64.urlsafe_b64decode is lenient by default.
-    with pytest.raises(ValueError, match="Join link payload too short"):
+    # Garbage data after prefix will cause zlib/decompression errors
+    with pytest.raises(ValueError, match="Invalid join link data"):
         link.decode("colabsync1_@@@")

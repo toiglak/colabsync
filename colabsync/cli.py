@@ -181,9 +181,11 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
     console.print("[dim]starting colabsync in background...[/dim]")
     subprocess.Popen(
         cmd,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True
+        start_new_session=True,
+        close_fds=True
     )
     
     # Wait for the link file to appear
