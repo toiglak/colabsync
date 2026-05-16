@@ -6,8 +6,6 @@ The Colab VS Code extension handles the notebook file itself. colabsync handles 
 
 No GitHub push/pull. No manual uploads. No `chore: sync` commits.
 
----
-
 ## How it works
 
 1. You run a setup cell in Colab that installs cloudflared, starts a small WebSocket server, and opens a Cloudflare Quick Tunnel to expose it.
@@ -16,23 +14,20 @@ No GitHub push/pull. No manual uploads. No `chore: sync` commits.
 
 Changes flow one way: local to Colab. Persistent outputs (checkpoints, datasets) live in mounted Google Drive and are never touched by this tool.
 
----
-
 ## Colab setup
 
-Paste this into a Colab terminal and run it once per session:
+Paste this into Colab terminal and run it:
 
 ```python
-curl -fsSL https://raw.githubusercontent.com/toiglak/colabsync/main/scripts/colab-hook.sh | bash
+uv tool install git+https://github.com/toiglak/colabsync.git
+colabsync start
 ```
 
 It will print something like:
 
-```
+```sh
 colabsync cs1_aHR0cHM6Ly9...
 ```
-
----
 
 ## Local usage
 
@@ -51,12 +46,10 @@ colabsync cs1_aHR0cHM6Ly9...
 Or with an explicit root:
 
 ```sh
-colabsync cs1_aHR0cHM6Ly9... --root ~/projects/myrepo
+colabsync join colabsync_... --root ~/projects/myrepo
 ```
 
 colabsync keeps running and reconnects automatically if the connection drops. Stop it with Ctrl-C.
-
----
 
 ## What gets synced
 
@@ -73,22 +66,6 @@ A typical `.colabignore`:
 # Don't push the notebook — the Colab extension handles that
 my_experiment.ipynb
 ```
-
----
-
-## Security
-
-The join link encodes a 32-byte random secret alongside the tunnel URL. The server rejects any inbound connection that doesn't present this secret. The Cloudflare tunnel provides TLS; the server itself only listens on localhost. The secret is ephemeral — it's regenerated every time the Colab hook runs.
-
----
-
-## Requirements
-
-- Python 3.13+
-- `cloudflared` (installed automatically by the hook script in Colab)
-- A Google Colab session with the Colab VS Code extension
-
----
 
 ## License
 

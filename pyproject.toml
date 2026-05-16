@@ -25,7 +25,6 @@ dependencies = [
 
 [project.scripts]
 colabsync = "colabsync.cli:main"
-colabsync-server = "colabsync.server_cli:server_main"
 
 [build-system]
 requires = ["hatchling"]

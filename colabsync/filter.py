@@ -19,7 +19,7 @@ import gitignore_parser
 from rich.console import Console
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB
-LARGE_DIR_THRESHOLD = 1_000  # entries
+LARGE_DIR_THRESHOLD = 100  # entries
 
 console = Console(stderr=True)
 

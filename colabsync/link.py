@@ -15,14 +15,17 @@ from __future__ import annotations
 
 import base64
 import os
+import zlib
 
 
-PREFIX = "cs1_"
+PREFIX = "colabsync1_"
 
 
 def encode(tunnel_url: str, secret: bytes) -> str:
     """Return a short join link from a tunnel URL and a secret."""
-    payload = f"{tunnel_url}\n{secret.hex()}".encode()
+    # Compress URL and use _ as separator
+    compressed_url = zlib.compress(tunnel_url.encode())
+    payload = compressed_url + b"_" + secret.hex().encode()
     b64 = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
     return PREFIX + b64
 
@@ -41,22 +44,23 @@ def decode(link: str) -> tuple[str, bytes]:
     if padding != 4:
         b64 += "=" * padding
     try:
-        payload = base64.urlsafe_b64decode(b64).decode()
+        b64_decoded = base64.urlsafe_b64decode(b64)
     except Exception as exc:
         raise ValueError(f"Could not decode join link: {exc}") from exc
 
-    parts = payload.split("\n", 1)
+    parts = b64_decoded.split(b"_", 1)
     if len(parts) != 2:
         raise ValueError("Malformed join link payload")
 
-    tunnel_url, secret_hex = parts
+    compressed_url, secret_hex = parts
     try:
-        secret = bytes.fromhex(secret_hex)
-    except ValueError as exc:
-        raise ValueError(f"Invalid secret in join link: {exc}") from exc
+        tunnel_url = zlib.decompress(compressed_url).decode()
+        secret = bytes.fromhex(secret_hex.decode())
+    except Exception as exc:
+        raise ValueError(f"Invalid join link data: {exc}") from exc
 
     return tunnel_url, secret
 
 
-def generate_secret(nbytes: int = 32) -> bytes:
+def generate_secret(nbytes: int = 8) -> bytes:
     return os.urandom(nbytes)

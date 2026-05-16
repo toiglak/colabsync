@@ -1,32 +1,23 @@
 """
 Wire protocol between the local client and the Colab server.
 
-All messages are JSON-encoded and sent as WebSocket text frames.
+All control messages are JSON-encoded and sent as WebSocket text frames.
+File data (PUT) is sent as WebSocket binary frames.
 
-Client → Server
+Client → Server (Text)
 ---------------
   { "type": "auth", "secret": "<hex>" }
-      Must be the first message. Server closes the connection if auth fails.
-
-  { "type": "put", "path": "<relative>", "data": "<base64>" }
-      Create or overwrite a file.
-
   { "type": "delete", "path": "<relative>" }
-      Delete a file.
 
-  { "type": "ping" }
-      Keepalive.
+Client → Server (Binary)
+-----------------
+  Header (JSON) + \0 + File Body
+  Header: { "type": "put", "path": "<relative>" }
 
-Server → Client
+Server → Client (Text)
 ---------------
   { "type": "ok" }
-      Auth accepted.
-
   { "type": "error", "message": "..." }
-      Auth rejected or other error.
-
-  { "type": "pong" }
-      Reply to ping.
 """
 
 from __future__ import annotations
@@ -44,10 +35,11 @@ def auth_msg(secret: bytes) -> str:
     return json.dumps({"type": "auth", "secret": secret.hex()})
 
 
-def put_msg(root: Path, path: Path) -> str:
+def put_msg(root: Path, path: Path) -> bytes:
     rel = path.relative_to(root).as_posix()
-    data = base64.b64encode(path.read_bytes()).decode()
-    return json.dumps({"type": "put", "path": rel, "data": data})
+    header = json.dumps({"type": "put", "path": rel}).encode()
+    body = path.read_bytes()
+    return header + b"\0" + body
 
 
 def delete_msg(root: Path, path: Path) -> str:
@@ -85,9 +77,13 @@ def parse(raw: str) -> dict:
     return msg
 
 
-def decode_put(msg: dict) -> tuple[str, bytes]:
-    """Return (relative_path_str, file_bytes)."""
+def parse_binary_put(raw: bytes) -> tuple[str, bytes]:
+    """Parse a binary put message: header_json + \0 + body."""
     try:
-        return msg["path"], base64.b64decode(msg["data"])
-    except (KeyError, Exception) as exc:
-        raise ValueError(f"Malformed put message: {exc}") from exc
+        header_part, body = raw.split(b"\0", 1)
+        header = json.loads(header_part.decode())
+        if header.get("type") != "put":
+            raise ValueError(f"Expected type 'put', got {header.get('type')}")
+        return header["path"], body
+    except Exception as exc:
+        raise ValueError(f"Malformed binary put message: {exc}") from exc

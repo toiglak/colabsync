@@ -23,6 +23,7 @@ console = Console(stderr=True)
 
 PING_INTERVAL = 20  # seconds
 RECONNECT_DELAY = 3  # seconds
+MAX_MSG_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
@@ -64,6 +65,7 @@ async def _connect_and_watch(
         ping_interval=PING_INTERVAL,
         ping_timeout=10,
         open_timeout=15,
+        max_size=MAX_MSG_SIZE,
     ) as ws:
         # --- Authenticate ---
         await ws.send(protocol.auth_msg(secret))

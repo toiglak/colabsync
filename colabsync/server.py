@@ -37,7 +37,7 @@ class ColabServer:
             f"[bold]colabsync server[/bold] listening on "
             f"[cyan]{self.host}:{self.port}[/cyan]  root=[cyan]{self.dest_root}[/cyan]"
         )
-        async with websockets.serve(self._handler, self.host, self.port):
+        async with websockets.serve(self._handler, self.host, self.port, max_size=10 * 1024 * 1024):
             await asyncio.get_event_loop().create_future()  # run forever
 
     async def _handler(self, ws) -> None:
@@ -67,7 +67,11 @@ class ColabServer:
             # --- Message loop ---
             async for raw in ws:
                 try:
-                    self._handle_message(protocol.parse(raw))
+                    if isinstance(raw, bytes):
+                        rel_path, data = protocol.parse_binary_put(raw)
+                        self._handle_put(rel_path, data)
+                    else:
+                        self._handle_json_message(protocol.parse(raw))
                 except ValueError as exc:
                     console.print(f"[yellow]warn[/yellow] bad message: {exc}")
 
@@ -76,28 +80,21 @@ class ColabServer:
         except Exception as exc:
             console.print(f"[red]error[/red] handler: {exc}")
 
-    def _handle_message(self, msg: dict) -> None:
+    def _handle_put(self, rel_path: str, data: bytes) -> None:
+        dest = self._safe_path(rel_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        console.print(f"[cyan]put[/cyan]    [dim]{rel_path}[/dim]")
+
+    def _handle_json_message(self, msg: dict) -> None:
         mtype = msg.get("type")
 
-        if mtype == "put":
-            rel_path, data = protocol.decode_put(msg)
-            dest = self._safe_path(rel_path)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
-            console.print(f"[cyan]put[/cyan]    [dim]{rel_path}[/dim]")
-
-        elif mtype == "delete":
+        if mtype == "delete":
             rel_path = msg.get("path", "")
             dest = self._safe_path(rel_path)
             if dest.exists():
                 dest.unlink()
                 console.print(f"[red]del[/red]    [dim]{rel_path}[/dim]")
-
-        elif mtype == "ping":
-            # pong is handled by the websockets library's ping/pong; we just ignore it
-            pass
-
-        # Ignore unknown message types silently
 
     def _safe_path(self, rel: str) -> Path:
         """Resolve *rel* under dest_root and ensure no path traversal."""
