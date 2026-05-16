@@ -22,7 +22,10 @@ from colabsync import protocol
 console = Console(stderr=True)
 
 PING_INTERVAL = 20  # seconds
-RECONNECT_DELAY = 3  # seconds
+RECONNECT_INITIAL_DELAY = 2.0
+RECONNECT_MAX_DELAY = 60.0
+RECONNECT_FACTOR = 2.0
+MAX_RECONNECT_ATTEMPTS = 5
 MAX_MSG_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
@@ -30,8 +33,7 @@ async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
     """
     Main entry-point for the local client.
 
-    Runs until cancelled (Ctrl-C).  Reconnects automatically if the connection
-    drops.
+    Runs until cancelled (Ctrl-C) or until reconnection fails repeatedly.
     """
     ws_url = tunnel_url.replace("http://", "ws://").replace("https://", "wss://")
     filt = FileFilter(root)
@@ -39,16 +41,32 @@ async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
     console.print(f"[bold]colabsync[/bold]  root  [cyan]{root}[/cyan]")
     console.print(f"[bold]colabsync[/bold]  remote [cyan]{ws_url}[/cyan]")
 
+    delay = RECONNECT_INITIAL_DELAY
+    attempts = 0
+
     while True:
         try:
             await _connect_and_watch(ws_url, secret, root, filt)
+            # If we were watching and the connection closed gracefully, 
+            # or if it was established successfully then dropped:
+            delay = RECONNECT_INITIAL_DELAY
+            attempts = 0
         except (
             websockets.ConnectionClosed,
             websockets.WebSocketException,
             OSError,
         ) as exc:
-            console.print(f"[red]connection lost[/red] ({exc}) – retrying in {RECONNECT_DELAY}s")
-            await asyncio.sleep(RECONNECT_DELAY)
+            attempts += 1
+            if attempts > MAX_RECONNECT_ATTEMPTS:
+                console.print(f"[red]error[/red] connection lost and exceeded maximum retries ({MAX_RECONNECT_ATTEMPTS}). giving up.")
+                return
+
+            console.print(
+                f"[red]connection lost[/red] ({exc}) – retrying in {delay:.1f}s "
+                f"(attempt {attempts}/{MAX_RECONNECT_ATTEMPTS})"
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * RECONNECT_FACTOR, RECONNECT_MAX_DELAY)
         except asyncio.CancelledError:
             console.print("[dim]colabsync stopped[/dim]")
             return
