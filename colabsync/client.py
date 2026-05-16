@@ -1,0 +1,140 @@
+"""
+Local-side sync engine.
+
+Connects to the Colab server via WebSocket (over a Cloudflare tunnel),
+authenticates with the shared secret, performs an initial full sync, and then
+watches the repository for changes using watchfiles.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hmac
+from pathlib import Path
+
+import websockets
+from rich.console import Console
+from watchfiles import awatch, Change
+
+from colabsync.filter import FileFilter
+from colabsync import protocol
+
+console = Console(stderr=True)
+
+PING_INTERVAL = 20  # seconds
+RECONNECT_DELAY = 3  # seconds
+
+
+async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
+    """
+    Main entry-point for the local client.
+
+    Runs until cancelled (Ctrl-C).  Reconnects automatically if the connection
+    drops.
+    """
+    ws_url = tunnel_url.replace("http://", "ws://").replace("https://", "wss://")
+    filt = FileFilter(root)
+
+    console.print(f"[bold]colabsync[/bold]  root  [cyan]{root}[/cyan]")
+    console.print(f"[bold]colabsync[/bold]  remote [cyan]{ws_url}[/cyan]")
+
+    while True:
+        try:
+            await _connect_and_watch(ws_url, secret, root, filt)
+        except (
+            websockets.ConnectionClosed,
+            websockets.WebSocketException,
+            OSError,
+        ) as exc:
+            console.print(f"[red]connection lost[/red] ({exc}) – retrying in {RECONNECT_DELAY}s")
+            await asyncio.sleep(RECONNECT_DELAY)
+        except asyncio.CancelledError:
+            console.print("[dim]colabsync stopped[/dim]")
+            return
+
+
+async def _connect_and_watch(
+    ws_url: str,
+    secret: bytes,
+    root: Path,
+    filt: FileFilter,
+) -> None:
+    async with websockets.connect(
+        ws_url,
+        ping_interval=PING_INTERVAL,
+        ping_timeout=10,
+        open_timeout=15,
+    ) as ws:
+        # --- Authenticate ---
+        await ws.send(protocol.auth_msg(secret))
+        raw = await asyncio.wait_for(ws.recv(), timeout=10)
+        reply = protocol.parse(raw)
+        if reply.get("type") != "ok":
+            raise RuntimeError(f"Auth rejected: {reply.get('message', 'unknown')}")
+
+        console.print("[green]connected[/green]  performing initial sync…")
+
+        # --- Initial full sync ---
+        await _initial_sync(ws, root, filt)
+        console.print("[green]ready[/green]  watching for changes")
+
+        # --- Watch for changes ---
+        async for changes in awatch(root, recursive=True):
+            # Refresh ignore matchers if a ignore-file itself changed
+            if _any_ignore_file_changed(changes):
+                filt.refresh()
+
+            for change_type, path_str in changes:
+                path = Path(path_str)
+
+                # Skip the .git directory entirely
+                if ".git" in path.parts:
+                    continue
+
+                if change_type == Change.deleted:
+                    # Send delete regardless of filters (the file was already there)
+                    try:
+                        rel = path.relative_to(root).as_posix()
+                        await ws.send(protocol.delete_msg(root, path))
+                        console.print(f"[red]del[/red]    [dim]{rel}[/dim]")
+                    except ValueError:
+                        pass
+                else:
+                    # Added or modified
+                    if not path.is_file():
+                        continue
+                    if not filt.should_sync(path):
+                        continue
+                    try:
+                        rel = path.relative_to(root).as_posix()
+                        await ws.send(protocol.put_msg(root, path))
+                        verb = "add" if change_type == Change.added else "upd"
+                        console.print(f"[cyan]{verb}[/cyan]    [dim]{rel}[/dim]")
+                    except (ValueError, OSError):
+                        pass
+
+
+async def _initial_sync(ws, root: Path, filt: FileFilter) -> None:
+    """Walk the tree and push every file that should be synced."""
+    sent = 0
+    for dirpath, dirnames, filenames in (root).walk():
+        # Prune directories in-place
+        dirnames[:] = [
+            d for d in dirnames
+            if d != ".git" and filt.should_sync_dir(Path(dirpath) / d)
+        ]
+        for fname in filenames:
+            path = Path(dirpath) / fname
+            if filt.should_sync(path):
+                try:
+                    await ws.send(protocol.put_msg(root, path))
+                    sent += 1
+                except OSError:
+                    pass
+
+    console.print(f"[dim]initial sync: {sent} file(s)[/dim]")
+
+
+def _any_ignore_file_changed(changes) -> bool:
+    ignore_names = {".gitignore", ".colabignore"}
+    return any(Path(p).name in ignore_names for _, p in changes)
