@@ -89,6 +89,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
             pid = int(PID_FILE.read_text())
             os.kill(pid, 0)
             console.print(f"[yellow]colabsync is already running (PID {pid}).[/yellow]")
+            _print_join_link_if_exists(header=False)
             console.print("Use [bold]colabsync stop[/bold] first if you want to restart.")
             sys.exit(1)
         except (ProcessLookupError, ValueError):
@@ -165,6 +166,7 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
             pid = int(PID_FILE.read_text())
             os.kill(pid, 0)
             console.print(f"[yellow]colabsync is already running (PID {pid}).[/yellow]")
+            _print_join_link_if_exists(header=False)
             return
         except (ProcessLookupError, ValueError):
             PID_FILE.unlink(missing_ok=True)
@@ -186,19 +188,29 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
     
     # Wait for the link file to appear
     for _ in range(30):
-        if LINK_FILE.exists():
-            try:
-                link = LINK_FILE.read_text().strip()
-                if link:
-                    console.print(f"\n[bold green]colabsync is ready![/bold green]")
-                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]\n")
-                    return
-            except Exception:
-                pass
+        if _print_join_link_if_exists():
+            return
         time.sleep(1)
     
     console.print("[red]timed out waiting for colabsync to start in background.[/red]")
     console.print("check /tmp/tunnel.log if cloudflared is failing.")
+
+
+def _print_join_link_if_exists(header: bool = True) -> bool:
+    """Read the link file and print the join command if present."""
+    if LINK_FILE.exists():
+        try:
+            link = LINK_FILE.read_text().strip()
+            if link:
+                if header:
+                    console.print(f"\n[bold green]colabsync is ready![/bold green]")
+                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]\n")
+                else:
+                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]")
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _is_colab() -> bool:
