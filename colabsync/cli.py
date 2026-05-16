@@ -115,7 +115,7 @@ def _is_colab() -> bool:
 
 
 def _install_cloudflared():
-    if subprocess.run(["command", "-v", "cloudflared"], shell=True, capture_output=True).returncode == 0:
+    if subprocess.run(["which", "cloudflared"], capture_output=True).returncode == 0:
         return
 
     console.print("[dim]installing cloudflared...[/dim]")
@@ -151,4 +151,11 @@ async def _start_tunnel(port: int) -> str:
         except Exception:
             pass
     
-    raise RuntimeError("Failed to start cloudflared tunnel")
+    # If we got here, it failed. Print logs for debugging.
+    try:
+        with open("/tmp/tunnel.log", "r") as f:
+            console.print(f"[red]Tunnel Logs:[/red]\n{f.read()}")
+    except Exception:
+        pass
+    
+    raise RuntimeError("Failed to start cloudflared tunnel (timed out waiting for URL)")

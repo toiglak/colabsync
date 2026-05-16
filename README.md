@@ -19,8 +19,7 @@ Changes flow one way: local to Colab. Persistent outputs (checkpoints, datasets)
 Paste this into Colab terminal and run it:
 
 ```python
-uv tool install git+https://github.com/toiglak/colabsync.git
-colabsync start
+uvx git+https://github.com/toiglak/colabsync.git start
 ```
 
 It will print something like:
