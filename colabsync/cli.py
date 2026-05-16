@@ -25,7 +25,7 @@ from colabsync import link as link_module
 from colabsync.client import run_client
 from colabsync.server import ColabServer
 
-console = Console(stderr=True)
+console = Console(stderr=True, force_terminal=True)
 
 PID_FILE = Path("/tmp/colabsync.pid")
 LINK_FILE = Path("/tmp/colabsync.link")
@@ -98,6 +98,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
 
     # 2. Install cloudflared if in Colab
     if in_colab:
+        STATUS_FILE.write_text("installing tunnel client...")
         _install_cloudflared()
 
     # 2. Setup secret
@@ -124,9 +125,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
             join_link = link_module.encode(tunnel_url, secret)
             LINK_FILE.write_text(join_link)
             
-            console.print(f"\n[bold green]colabsync is ready![/bold green]")
-            console.print(f"Run locally: [bold]colabsync join {join_link}[/bold]\n")
-            
+            # Keep daemon quiet as stdout is unneeded
             await server_task
         finally:
             if tunnel_proc:
@@ -178,28 +177,51 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
     LINK_FILE.unlink(missing_ok=True)
     STATUS_FILE.unlink(missing_ok=True)
 
-    if _is_colab():
-        _install_cloudflared()
+    # Initialize status file to show start phase
+    STATUS_FILE.write_text("initializing...")
+
     # Construct command to run in foreground in the background process
     cmd = [sys.executable, "-m", "colabsync.cli", "start", "--port", str(port), "--dest", str(dest), "--_daemon"]
     if force:
         cmd.append("--force")
     
-    with console.status("preparing tunnel...", spinner="dots"):
-        subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True
-        )
+    subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True
+    )
+    
+    spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    frame_idx = 0
+    current_msg = "preparing tunnel..."
+    
+    # Wait up to 60 seconds with responsive polling
+    for _ in range(240):
+        if LINK_FILE.exists():
+            break
+        if STATUS_FILE.exists():
+            try:
+                msg = STATUS_FILE.read_text().strip()
+                if msg:
+                    current_msg = msg
+            except Exception:
+                pass
+                
+        frame = spinner_frames[frame_idx % len(spinner_frames)]
+        frame_idx += 1
         
-        # Wait for the link file to appear
-        for _ in range(60):
-            if LINK_FILE.exists():
-                break
-            time.sleep(1)
+        # Write to stdout using \r and ANSI clear-to-end-of-line \033[K
+        sys.stdout.write(f"\r \033[36m{frame}\033[0m {current_msg}\033[K")
+        sys.stdout.flush()
+        
+        time.sleep(0.25)
+        
+    # Completely wipe the spinner line from terminal history
+    sys.stdout.write("\r\033[K")
+    sys.stdout.flush()
     
     # Now that the spinner is gone, print the final message
     if not _print_join_link_if_exists(header=True):
@@ -216,10 +238,9 @@ def _print_join_link_if_exists(header: bool = True) -> bool:
             link = LINK_FILE.read_text().strip()
             if link:
                 if header:
-                    console.print(f"\n[bold green]colabsync is ready![/bold green]")
-                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]\n")
+                    console.print(f"\n  ➜  [bold green]colabsync join {link}[/bold green]\n")
                 else:
-                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]")
+                    console.print(f"  ➜  [bold green]colabsync join {link}[/bold green]")
                 return True
         except Exception:
             pass
