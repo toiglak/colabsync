@@ -40,7 +40,7 @@ def _build_gitignore_matcher(root: Path) -> Callable[[str], bool]:
     global_gi = _global_gitignore_path()
     if global_gi and global_gi.exists():
         try:
-            matchers.append(gitignore_parser.parse_gitignore(global_gi))
+            matchers.append(gitignore_parser.parse_gitignore(global_gi, base_dir=str(root)))
         except Exception:
             pass
 
@@ -56,7 +56,15 @@ def _build_gitignore_matcher(root: Path) -> Callable[[str], bool]:
         dirnames[:] = [d for d in dirnames if d != ".git"]
 
     def matches(path: str) -> bool:
-        return any(m(path) for m in matchers)
+        for m in matchers:
+            try:
+                if m(path):
+                    return True
+            except ValueError:
+                # gitignore_parser raises ValueError when the path isn't under
+                # the matcher's base_dir — that just means "doesn't apply here".
+                pass
+        return False
 
     return matches
 
