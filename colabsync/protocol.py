@@ -8,6 +8,7 @@ Client → Server (Text)
 ---------------
   { "type": "auth", "secret": "<hex>" }
   { "type": "delete", "path": "<relative>" }
+  { "type": "batch", "msgs": [ { "type": "delete", ... }, { "type": "put", ... } ] }
 
 Client → Server (Binary)
 -----------------
@@ -77,13 +78,57 @@ def parse(raw: str) -> dict:
     return msg
 
 
-def parse_binary_put(raw: bytes) -> tuple[str, bytes]:
-    """Parse a binary put message: header_json + \0 + body."""
+def batch_msg(msgs: list[str | bytes]) -> bytes:
+    """Combine multiple messages into a single binary batch message."""
+    # We use a binary format for the batch to support binary PUTs inside it
+    # Format: [header_json] + \0 + [len1 (4 bytes)] + [msg1] + [len2 (4 bytes)] + [msg2] ...
+    header = json.dumps({"type": "batch", "count": len(msgs)}).encode()
+    payload = byteorder_to_bytes(len(header)) + header
+    for msg in msgs:
+        if isinstance(msg, str):
+            msg = msg.encode()
+        payload += byteorder_to_bytes(len(msg)) + msg
+    return payload
+
+
+def byteorder_to_bytes(n: int) -> bytes:
+    return n.to_bytes(4, byteorder="big")
+
+
+def bytes_to_int(b: bytes) -> int:
+    return int.from_bytes(b, byteorder="big")
+
+
+def parse_batch(raw: bytes) -> list[tuple[str, any]]:
+    """Parse a binary batch message and return a list of (type, payload) tuples."""
     try:
-        header_part, body = raw.split(b"\0", 1)
-        header = json.loads(header_part.decode())
-        if header.get("type") != "put":
-            raise ValueError(f"Expected type 'put', got {header.get('type')}")
-        return header["path"], body
+        offset = 0
+        
+        # Read header
+        header_len = bytes_to_int(raw[offset:offset+4])
+        offset += 4
+        header = json.loads(raw[offset:offset+header_len].decode())
+        offset += header_len
+        
+        if header.get("type") != "batch":
+            raise ValueError("Not a batch message")
+            
+        results = []
+        for _ in range(header.get("count", 0)):
+            msg_len = bytes_to_int(raw[offset:offset+4])
+            offset += 4
+            msg_raw = raw[offset:offset+msg_len]
+            offset += msg_len
+            
+            # Sub-message could be binary PUT or JSON text
+            try:
+                # Try JSON first (text control messages)
+                msg_text = msg_raw.decode()
+                results.append(("json", json.loads(msg_text)))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                # Must be a binary PUT
+                results.append(("put", parse_binary_put(msg_raw)))
+                
+        return results
     except Exception as exc:
-        raise ValueError(f"Malformed binary put message: {exc}") from exc
+        raise ValueError(f"Malformed batch message: {exc}") from exc

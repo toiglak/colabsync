@@ -68,8 +68,19 @@ class ColabServer:
             async for raw in ws:
                 try:
                     if isinstance(raw, bytes):
-                        rel_path, data = protocol.parse_binary_put(raw)
-                        self._handle_put(rel_path, data)
+                        # Could be a single PUT or a BATCH
+                        try:
+                            # Try parsing as batch first
+                            items = protocol.parse_batch(raw)
+                            for itype, payload in items:
+                                if itype == "put":
+                                    self._handle_put(*payload)
+                                elif itype == "json":
+                                    self._handle_json_message(payload)
+                        except ValueError:
+                            # Fallback to single binary put
+                            rel_path, data = protocol.parse_binary_put(raw)
+                            self._handle_put(rel_path, data)
                     else:
                         self._handle_json_message(protocol.parse(raw))
                 except ValueError as exc:

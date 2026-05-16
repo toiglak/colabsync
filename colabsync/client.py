@@ -117,24 +117,42 @@ async def _connect_and_watch(
 
 
 async def _initial_sync(ws, root: Path, filt: FileFilter) -> None:
-    """Walk the tree and push every file that should be synced."""
-    sent = 0
+    """Walk the tree and push files in batches."""
+    batch_msgs = []
+    batch_bytes = 0
+    total_sent = 0
+    
+    # Limits for batching
+    MAX_BATCH_SIZE = 5 * 1024 * 1024  # 5 MB
+    MAX_BATCH_COUNT = 100
+
     for dirpath, dirnames, filenames in (root).walk():
-        # Prune directories in-place
         dirnames[:] = [
             d for d in dirnames
             if d != ".git" and filt.should_sync_dir(Path(dirpath) / d)
         ]
+        
         for fname in filenames:
             path = Path(dirpath) / fname
             if filt.should_sync(path):
                 try:
-                    await ws.send(protocol.put_msg(root, path))
-                    sent += 1
+                    msg = protocol.put_msg(root, path)
+                    batch_msgs.append(msg)
+                    batch_bytes += len(msg)
+                    total_sent += 1
+                    
+                    if batch_bytes >= MAX_BATCH_SIZE or len(batch_msgs) >= MAX_BATCH_COUNT:
+                        await ws.send(protocol.batch_msg(batch_msgs))
+                        batch_msgs = []
+                        batch_bytes = 0
                 except OSError:
                     pass
 
-    console.print(f"[dim]initial sync: {sent} file(s)[/dim]")
+    # Final batch
+    if batch_msgs:
+        await ws.send(protocol.batch_msg(batch_msgs))
+
+    console.print(f"[dim]initial sync: {total_sent} file(s)[/dim]")
 
 
 def _any_ignore_file_changed(changes) -> bool:

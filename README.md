@@ -26,7 +26,7 @@ colabsync start
 It will print something like:
 
 ```sh
-colabsync cs1_aHR0cHM6Ly9...
+colabsync colabsync1_aHR0cHM6Ly9...
 ```
 
 ## Local usage
@@ -40,7 +40,7 @@ uv tool install git+https://github.com/toiglak/colabsync.git
 Run, pointing at the root of the repository you want to sync:
 
 ```sh
-colabsync cs1_aHR0cHM6Ly9...
+colabsync colabsync1_aHR0cHM6Ly9...
 ```
 
 Or with an explicit root:
@@ -57,7 +57,7 @@ colabsync filters files using the same rules as git, plus a few extras:
 
 - **`.gitignore`** — global and all local `.gitignore` files are respected.
 - **`.colabignore`** — an optional file in your repo root, same syntax as `.gitignore`. Use it to exclude the notebook itself or any other files you don't want pushed.
-- **Large directories** — any directory with 1,000+ entries is skipped automatically. If it isn't already covered by `.gitignore`, a warning is printed reminding you to add it.
+- **Large directories** — any directory with 100+ entries is skipped automatically. If it isn't already covered by `.gitignore`, a warning is printed reminding you to add it.
 - **Large files** — individual files over 2 MB are skipped and logged.
 
 A typical `.colabignore`:
