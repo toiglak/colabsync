@@ -26,6 +26,18 @@ def test_encode_decode_roundtrip():
         assert decoded_url == expected_url
         assert decoded_secret == secret
 
+def test_fallback_characters():
+    # Numbers and uppercase are NOT in the 5-bit alphabet, 
+    # they should trigger the 8-bit escape fallback.
+    url = "wss://My-Tunnel-123.example.com"
+    secret = b"fllb"
+    
+    encoded = link.encode(url, secret)
+    decoded_url, decoded_secret = link.decode(encoded)
+    
+    assert decoded_url == url
+    assert decoded_secret == secret
+
 def test_different_protocols():
     protocols = ["https://", "http://", "ws://", "wss://"]
     secret = b"prot"
