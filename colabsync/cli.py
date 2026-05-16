@@ -190,7 +190,7 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
             try:
                 link = LINK_FILE.read_text().strip()
                 if link:
-                    console.print(f"\n[bold green]colabsync is ready (background)![/bold green]")
+                    console.print(f"\n[bold green]colabsync is ready![/bold green]")
                     console.print(f"Run locally: [bold]colabsync join {link}[/bold]\n")
                     return
             except Exception:
