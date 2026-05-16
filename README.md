@@ -20,10 +20,10 @@ Changes flow one way: local to Colab. Persistent outputs (checkpoints, datasets)
 
 ## Colab setup
 
-Paste this into a Colab cell and run it once per session:
+Paste this into a Colab terminal and run it once per session:
 
 ```python
-!curl -fsSL https://raw.githubusercontent.com/toiglak/colabsync/main/scripts/colab-hook.sh | bash
+curl -fsSL https://raw.githubusercontent.com/toiglak/colabsync/main/scripts/colab-hook.sh | bash
 ```
 
 It will print something like:

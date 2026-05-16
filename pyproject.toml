@@ -3,7 +3,7 @@ name = "colabsync"
 version = "0.1.0"
 description = "Live-sync a local repository into a Google Colab session"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 keywords = ["colab", "sync", "google-colab", "development"]
 classifiers = [

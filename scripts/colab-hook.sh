@@ -6,7 +6,7 @@
 #
 # What it does:
 #   1. Installs cloudflared (Cloudflare's tunnel client).
-#   2. Installs colabsync server-side via uv/pip.
+#   2. Installs colabsync from GitHub via uv (preinstalled in Colab).
 #   3. Generates a shared secret.
 #   4. Starts the colabsync WebSocket server on localhost.
 #   5. Opens a Cloudflare Quick Tunnel and captures the public URL.
@@ -19,7 +19,6 @@ set -euo pipefail
 
 COLABSYNC_PORT="${COLABSYNC_PORT:-8765}"
 COLABSYNC_DEST="${COLABSYNC_DEST:-/content}"
-COLABSYNC_VERSION="${COLABSYNC_VERSION:-0.1.0}"
 
 # ---------------------------------------------------------------------------
 # 1. Install cloudflared
@@ -36,15 +35,15 @@ https://pkg.cloudflare.com/cloudflared any main" \
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Install colabsync (Python package, server side only)
+# 2. Install colabsync via uv (preinstalled in Colab)
 # ---------------------------------------------------------------------------
-if ! command -v uv &>/dev/null; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+COLABSYNC_PKG="git+https://github.com/toiglak/colabsync.git"
 
-uv tool install "colabsync==${COLABSYNC_VERSION}" --quiet 2>/dev/null \
-  || uv tool install "git+https://github.com/toiglak/colabsync.git" --quiet
+echo "[colabsync] installing colabsync..."
+uv tool install "$COLABSYNC_PKG" --reinstall-package colabsync
+
+# uv puts tool binaries in ~/.local/bin — ensure it's on PATH
+export PATH="$HOME/.local/bin:$PATH"
 
 # ---------------------------------------------------------------------------
 # 3. Generate a shared secret
