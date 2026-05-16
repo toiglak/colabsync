@@ -25,7 +25,7 @@ uvx git+https://github.com/toiglak/colabsync.git start
 It will print something like:
 
 ```sh
-colabsync colabsync1_aHR0cHM6Ly9...
+colabsync cs1_aHR0cHM6Ly9...
 ```
 
 ## Local usage
@@ -39,7 +39,7 @@ uv tool install git+https://github.com/toiglak/colabsync.git
 Run, pointing at the root of the repository you want to sync:
 
 ```sh
-colabsync colabsync1_aHR0cHM6Ly9...
+colabsync cs1_aHR0cHM6Ly9...
 ```
 
 Or with an explicit root:

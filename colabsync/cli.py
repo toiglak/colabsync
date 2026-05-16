@@ -185,7 +185,7 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
     if force:
         cmd.append("--force")
     
-    with console.status("[bold cyan]preparing tunnel...", spinner="dots") as status:
+    with console.status("preparing tunnel...", spinner="dots"):
         subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
@@ -195,26 +195,18 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
             close_fds=True
         )
         
-        # Wait for the link file to appear, showing progress from the daemon
-        last_status = None
+        # Wait for the link file to appear
         for _ in range(60):
-            if STATUS_FILE.exists():
-                try:
-                    daemon_status = STATUS_FILE.read_text().strip()
-                    if daemon_status and daemon_status != last_status:
-                        # We could update the status message here if we wanted more detail
-                        # status.update(f"[bold cyan]{daemon_status}...")
-                        last_status = daemon_status
-                except Exception:
-                    pass
-
-            if _print_join_link_if_exists(header=False):
-                STATUS_FILE.unlink(missing_ok=True)
-                return
+            if LINK_FILE.exists():
+                break
             time.sleep(1)
     
-    console.print("[red]timed out waiting for colabsync to start in background.[/red]")
-    console.print("check /tmp/tunnel.log if cloudflared is failing.")
+    # Now that the spinner is gone, print the final message
+    if not _print_join_link_if_exists(header=True):
+        console.print("[red]timed out waiting for colabsync to start in background.[/red]")
+        console.print("check /tmp/tunnel.log if cloudflared is failing.")
+    
+    STATUS_FILE.unlink(missing_ok=True)
 
 
 def _print_join_link_if_exists(header: bool = True) -> bool:
