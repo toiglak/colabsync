@@ -29,6 +29,7 @@ console = Console(stderr=True)
 
 PID_FILE = Path("/tmp/colabsync.pid")
 LINK_FILE = Path("/tmp/colabsync.link")
+STATUS_FILE = Path("/tmp/colabsync.status")
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -110,6 +111,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
     async def run_all():
         PID_FILE.write_text(str(os.getpid()))
         LINK_FILE.unlink(missing_ok=True)
+        STATUS_FILE.unlink(missing_ok=True)
         
         server_task = asyncio.create_task(srv.serve())
         
@@ -132,6 +134,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
                 await tunnel_proc.wait()
             PID_FILE.unlink(missing_ok=True)
             LINK_FILE.unlink(missing_ok=True)
+            STATUS_FILE.unlink(missing_ok=True)
 
     try:
         asyncio.run(run_all())
@@ -157,6 +160,7 @@ def stop() -> None:
     
     PID_FILE.unlink(missing_ok=True)
     LINK_FILE.unlink(missing_ok=True)
+    STATUS_FILE.unlink(missing_ok=True)
 
 
 def _start_background(port: int, dest: Path, force: bool) -> None:
@@ -172,27 +176,42 @@ def _start_background(port: int, dest: Path, force: bool) -> None:
             PID_FILE.unlink(missing_ok=True)
 
     LINK_FILE.unlink(missing_ok=True)
-    
+    STATUS_FILE.unlink(missing_ok=True)
+
+    if _is_colab():
+        _install_cloudflared()
     # Construct command to run in foreground in the background process
     cmd = [sys.executable, "-m", "colabsync.cli", "start", "--port", str(port), "--dest", str(dest), "--_daemon"]
     if force:
         cmd.append("--force")
     
-    console.print("[dim]starting colabsync in background...[/dim]")
-    subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        close_fds=True
-    )
-    
-    # Wait for the link file to appear
-    for _ in range(30):
-        if _print_join_link_if_exists():
-            return
-        time.sleep(1)
+    with console.status("[bold cyan]preparing tunnel...", spinner="dots") as status:
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True
+        )
+        
+        # Wait for the link file to appear, showing progress from the daemon
+        last_status = None
+        for _ in range(60):
+            if STATUS_FILE.exists():
+                try:
+                    daemon_status = STATUS_FILE.read_text().strip()
+                    if daemon_status and daemon_status != last_status:
+                        # We could update the status message here if we wanted more detail
+                        # status.update(f"[bold cyan]{daemon_status}...")
+                        last_status = daemon_status
+                except Exception:
+                    pass
+
+            if _print_join_link_if_exists(header=False):
+                STATUS_FILE.unlink(missing_ok=True)
+                return
+            time.sleep(1)
     
     console.print("[red]timed out waiting for colabsync to start in background.[/red]")
     console.print("check /tmp/tunnel.log if cloudflared is failing.")
@@ -230,7 +249,6 @@ def _install_cloudflared():
     if subprocess.run(["which", "cloudflared"], capture_output=True).returncode == 0:
         return
 
-    console.print("[dim]installing cloudflared...[/dim]")
     commands = [
         "sudo mkdir -p --mode=0755 /usr/share/keyrings",
         "curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null",
@@ -243,7 +261,7 @@ def _install_cloudflared():
 
 
 async def _start_tunnel(port: int) -> tuple[str, asyncio.subprocess.Process]:
-    console.print("[dim]opening tunnel...[/dim]")
+    STATUS_FILE.write_text("opening tunnel...")
     log_file = open("/tmp/tunnel.log", "w")
     proc = await asyncio.create_subprocess_shell(
         f"cloudflared tunnel --url http://localhost:{port}",
