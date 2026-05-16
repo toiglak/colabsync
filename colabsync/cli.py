@@ -3,6 +3,7 @@ CLI entry-point for colabsync.
 
 Usage:
     colabsync start [--port PORT] [--dest DIR]
+    colabsync stop
     colabsync join <join-link> [--root DIR]
 """
 
@@ -10,8 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -22,6 +26,9 @@ from colabsync.client import run_client
 from colabsync.server import ColabServer
 
 console = Console(stderr=True)
+
+PID_FILE = Path("/tmp/colabsync.pid")
+LINK_FILE = Path("/tmp/colabsync.link")
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -63,13 +70,29 @@ def join(join_link: str, root: Path) -> None:
     help="Directory to write synced files into.",
 )
 @click.option("--force", is_flag=True, help="Force start even if not in Colab.")
-def start(port: int, dest: Path, force: bool) -> None:
+@click.option("--_daemon", is_flag=True, hidden=True)
+def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
     """Start the colabsync server (Colab side)."""
+    if not _daemon:
+        _start_background(port, dest, force)
+        return
+
     # 1. Environment check
     in_colab = _is_colab()
     if not in_colab and not force:
         console.print("[red]error[/red] Not in Colab environment. Use [bold]--force[/bold] to override.")
         sys.exit(1)
+
+    # Check if already running
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text())
+            os.kill(pid, 0)
+            console.print(f"[yellow]colabsync is already running (PID {pid}).[/yellow]")
+            console.print("Use [bold]colabsync stop[/bold] first if you want to restart.")
+            sys.exit(1)
+        except (ProcessLookupError, ValueError):
+            PID_FILE.unlink(missing_ok=True)
 
     # 2. Install cloudflared if in Colab
     if in_colab:
@@ -77,7 +100,6 @@ def start(port: int, dest: Path, force: bool) -> None:
 
     # 2. Setup secret
     secret = link_module.generate_secret()
-    secret_hex = secret.hex()
 
     # 3. Start server in background
     dest.mkdir(parents=True, exist_ok=True)
@@ -85,22 +107,98 @@ def start(port: int, dest: Path, force: bool) -> None:
     
     # We need to run the server and the tunnel concurrently
     async def run_all():
+        PID_FILE.write_text(str(os.getpid()))
+        LINK_FILE.unlink(missing_ok=True)
+        
         server_task = asyncio.create_task(srv.serve())
         
-        # 4. Start Tunnel
-        tunnel_url = await _start_tunnel(port)
-        
-        # 5. Print Join Link
-        join_link = link_module.encode(tunnel_url, secret)
-        console.print(f"\n[bold green]colabsync is ready![/bold green]")
-        console.print(f"Run locally: [bold]colabsync join {join_link}[/bold]\n")
-        
-        await server_task
+        tunnel_proc = None
+        try:
+            # 4. Start Tunnel
+            tunnel_url, tunnel_proc = await _start_tunnel(port)
+            
+            # 5. Print Join Link
+            join_link = link_module.encode(tunnel_url, secret)
+            LINK_FILE.write_text(join_link)
+            
+            console.print(f"\n[bold green]colabsync is ready![/bold green]")
+            console.print(f"Run locally: [bold]colabsync join {join_link}[/bold]\n")
+            
+            await server_task
+        finally:
+            if tunnel_proc:
+                tunnel_proc.terminate()
+                await tunnel_proc.wait()
+            PID_FILE.unlink(missing_ok=True)
+            LINK_FILE.unlink(missing_ok=True)
 
     try:
         asyncio.run(run_all())
     except KeyboardInterrupt:
         pass
+
+
+@main.command()
+def stop() -> None:
+    """Stop a running colabsync server."""
+    if not PID_FILE.exists():
+        console.print("[yellow]colabsync is not running.[/yellow]")
+        return
+
+    try:
+        pid = int(PID_FILE.read_text())
+        os.kill(pid, signal.SIGTERM)
+        console.print(f"[green]Stopped colabsync (PID {pid})[/green]")
+    except (ProcessLookupError, ValueError):
+        console.print("[yellow]colabsync was not running (stale PID file).[/yellow]")
+    except OSError as e:
+        console.print(f"[red]Error stopping colabsync: {e}[/red]")
+    
+    PID_FILE.unlink(missing_ok=True)
+    LINK_FILE.unlink(missing_ok=True)
+
+
+def _start_background(port: int, dest: Path, force: bool) -> None:
+    # Check if already running
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text())
+            os.kill(pid, 0)
+            console.print(f"[yellow]colabsync is already running (PID {pid}).[/yellow]")
+            return
+        except (ProcessLookupError, ValueError):
+            PID_FILE.unlink(missing_ok=True)
+
+    LINK_FILE.unlink(missing_ok=True)
+    
+    # Construct command to run in foreground in the background process
+    cmd = [sys.executable, "-m", "colabsync.cli", "start", "--port", str(port), "--dest", str(dest), "--_daemon"]
+    if force:
+        cmd.append("--force")
+    
+    console.print("[dim]starting colabsync in background...[/dim]")
+    subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+    
+    # Wait for the link file to appear
+    for _ in range(30):
+        if LINK_FILE.exists():
+            try:
+                link = LINK_FILE.read_text().strip()
+                if link:
+                    console.print(f"\n[bold green]colabsync is ready (background)![/bold green]")
+                    console.print(f"Run locally: [bold]colabsync join {link}[/bold]\n")
+                    return
+            except Exception:
+                pass
+        time.sleep(1)
+    
+    console.print("[red]timed out waiting for colabsync to start in background.[/red]")
+    console.print("check /tmp/tunnel.log if cloudflared is failing.")
 
 
 def _is_colab() -> bool:
@@ -130,13 +228,14 @@ def _install_cloudflared():
         subprocess.run(cmd, shell=True, check=True, capture_output=True)
 
 
-async def _start_tunnel(port: int) -> str:
+async def _start_tunnel(port: int) -> tuple[str, asyncio.subprocess.Process]:
     console.print("[dim]opening tunnel...[/dim]")
     log_file = open("/tmp/tunnel.log", "w")
     proc = await asyncio.create_subprocess_shell(
         f"cloudflared tunnel --url http://localhost:{port}",
         stdout=log_file,
-        stderr=log_file
+        stderr=log_file,
+        start_new_session=True
     )
     
     for _ in range(30):
@@ -144,14 +243,16 @@ async def _start_tunnel(port: int) -> str:
         try:
             with open("/tmp/tunnel.log", "r") as f:
                 content = f.read()
-                import re
                 match = re.search(r"https://[a-z0-9\-]+\.trycloudflare\.com", content)
                 if match:
-                    return match.group(0)
+                    return match.group(0), proc
         except Exception:
             pass
     
     # If we got here, it failed. Print logs for debugging.
+    if proc:
+        proc.terminate()
+        await proc.wait()
     try:
         with open("/tmp/tunnel.log", "r") as f:
             console.print(f"[red]Tunnel Logs:[/red]\n{f.read()}")
@@ -159,3 +260,7 @@ async def _start_tunnel(port: int) -> str:
         pass
     
     raise RuntimeError("Failed to start cloudflared tunnel (timed out waiting for URL)")
+
+
+if __name__ == "__main__":
+    main()

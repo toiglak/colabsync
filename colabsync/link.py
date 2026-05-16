@@ -24,8 +24,13 @@ PREFIX = "colabsync1_"
 def encode(tunnel_url: str, secret: bytes) -> str:
     """Return a short join link from a tunnel URL and a secret."""
     # Aggressive shortening:
-    # 1. Remove common prefix
-    url = tunnel_url.replace("https://", "")
+    # 1. Remove common prefixes
+    url = tunnel_url
+    for prefix in ["https://", "wss://", "http://", "ws://"]:
+        if url.startswith(prefix):
+            url = url[len(prefix):]
+            break
+            
     # 2. Pack as: [compressed_url_bytes] + [raw_secret_bytes]
     # (Since secret is 4 bytes fixed, we don't need a separator)
     compressed = zlib.compress(url.encode())
@@ -58,7 +63,14 @@ def decode(link: str) -> tuple[str, bytes]:
     
     try:
         url_part = zlib.decompress(compressed_url).decode()
-        tunnel_url = "https://" + url_part
+        # Default to https:// if no protocol was stored (legacy links might not have it)
+        # but our encode now strips it. 
+        # Actually, let's just always return the URL without protocol or with https://
+        # and let the client decide.
+        if "://" in url_part:
+            tunnel_url = url_part
+        else:
+            tunnel_url = "wss://" + url_part
     except Exception as exc:
         raise ValueError(f"Invalid join link data: {exc}") from exc
 
