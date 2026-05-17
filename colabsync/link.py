@@ -21,10 +21,13 @@ PREFIX = "cs1_"
 
 # Markers for common URL parts that don't appear in subdomains
 # $ = .trycloudflare.com
+# $a = .cfargotunnel.com
 _MARKERS = {
     ".trycloudflare.com": "$",
+    ".cfargotunnel.com": "$a",
 }
 _REV_MARKERS = {
+    "$a": ".cfargotunnel.com",
     "$": ".trycloudflare.com",
 }
 

@@ -5,6 +5,7 @@ def test_encode_decode_roundtrip():
     urls = [
         "wss://resort-ethernet-honor-quickly.trycloudflare.com",
         "wss://nurse-cave-above-absent.trycloudflare.com",
+        "wss://my-named-tunnel.cfargotunnel.com",
         "https://my-custom-tunnel.example.com",
         "wss://localhost",
     ]
