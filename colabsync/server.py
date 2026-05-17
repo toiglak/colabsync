@@ -40,6 +40,12 @@ class ColabServer:
         async with websockets.serve(self._handler, self.host, self.port, max_size=10 * 1024 * 1024):
             await asyncio.get_event_loop().create_future()  # run forever
 
+    def _self_destruct(self) -> None:
+        console.print("[yellow]invalid secret received. shutting down server for security.[/yellow]")
+        import os
+        import signal
+        os.kill(os.getpid(), signal.SIGTERM)
+
     async def _handler(self, ws) -> None:
         peer = ws.remote_address
         try:
@@ -48,17 +54,20 @@ class ColabServer:
                 raw = await asyncio.wait_for(ws.recv(), timeout=10)
             except asyncio.TimeoutError:
                 await ws.send(protocol.error_msg("auth timeout"))
+                console.print(f"[red]rejected[/red] connection from {peer} – timeout")
                 return
 
             msg = protocol.parse(raw)
             if msg.get("type") != "auth":
                 await ws.send(protocol.error_msg("expected auth message"))
+                console.print(f"[red]rejected[/red] connection from {peer} – expected auth message")
                 return
 
             incoming_secret_part = bytes.fromhex(msg.get("secret", ""))
             if not hmac.compare_digest(incoming_secret_part, self.secret[:2]):
                 await ws.send(protocol.error_msg("invalid secret"))
-                console.print(f"[red]rejected[/red] connection from {peer}")
+                console.print(f"[red]rejected[/red] connection from {peer} – invalid secret")
+                self._self_destruct()
                 return
 
             await ws.send(protocol.ok_msg(self.secret))
