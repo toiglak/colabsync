@@ -23,9 +23,8 @@ console = Console(stderr=True)
 
 PING_INTERVAL = 20  # seconds
 RECONNECT_INITIAL_DELAY = 2.0
-RECONNECT_MAX_DELAY = 60.0
+RECONNECT_MAX_DELAY = 30.0
 RECONNECT_FACTOR = 2.0
-MAX_RECONNECT_ATTEMPTS = 5
 MAX_MSG_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
@@ -33,7 +32,8 @@ async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
     """
     Main entry-point for the local client.
 
-    Runs until cancelled (Ctrl-C) or until reconnection fails repeatedly.
+    Runs until cancelled (Ctrl-C). Reconnects automatically in the background
+    if the connection drops.
     """
     ws_url = tunnel_url.replace("http://", "ws://").replace("https://", "wss://")
     filt = FileFilter(root)
@@ -60,15 +60,12 @@ async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
             OSError,
         ) as exc:
             attempts += 1
-            if attempts > MAX_RECONNECT_ATTEMPTS:
-                console.print(f"[red]error[/red] connection lost and exceeded maximum retries ({MAX_RECONNECT_ATTEMPTS}). giving up.")
-                return
-
-            console.print(
+            status_text = (
                 f"[red]connection lost[/red] ({exc}) – retrying in {delay:.1f}s "
-                f"(attempt {attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                f"(attempt {attempts})"
             )
-            await asyncio.sleep(delay)
+            with console.status(status_text, spinner="dots"):
+                await asyncio.sleep(delay)
             delay = min(delay * RECONNECT_FACTOR, RECONNECT_MAX_DELAY)
         except asyncio.CancelledError:
             console.print("[dim]colabsync stopped[/dim]")
