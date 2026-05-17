@@ -51,6 +51,9 @@ async def run_client(root: Path, tunnel_url: str, secret: bytes) -> None:
             # or if it was established successfully then dropped:
             delay = RECONNECT_INITIAL_DELAY
             attempts = 0
+        except websockets.ConnectionClosedOK:
+            console.print("[yellow]colabsync server has shut down gracefully (Colab session stopped or stop command run). Stopping client.[/yellow]")
+            return
         except (
             websockets.ConnectionClosed,
             websockets.WebSocketException,
@@ -99,39 +102,56 @@ async def _connect_and_watch(
         console.print("[green]ready[/green]  watching for changes")
 
         # --- Watch for changes ---
-        async for changes in awatch(root, recursive=True):
-            # Refresh ignore matchers if a ignore-file itself changed
-            if _any_ignore_file_changed(changes):
-                filt.refresh()
+        async def watch_loop():
+            async for changes in awatch(root, recursive=True):
+                # Refresh ignore matchers if a ignore-file itself changed
+                if _any_ignore_file_changed(changes):
+                    filt.refresh()
 
-            for change_type, path_str in changes:
-                path = Path(path_str)
+                for change_type, path_str in changes:
+                    path = Path(path_str)
 
-                # Skip the .git directory entirely
-                if ".git" in path.parts:
-                    continue
-
-                if change_type == Change.deleted:
-                    # Send delete regardless of filters (the file was already there)
-                    try:
-                        rel = path.relative_to(root).as_posix()
-                        await ws.send(protocol.delete_msg(root, path))
-                        console.print(f"[red]del[/red]    [dim]{rel}[/dim]")
-                    except ValueError:
-                        pass
-                else:
-                    # Added or modified
-                    if not path.is_file():
+                    # Skip the .git directory entirely
+                    if ".git" in path.parts:
                         continue
-                    if not filt.should_sync(path):
-                        continue
-                    try:
-                        rel = path.relative_to(root).as_posix()
-                        await ws.send(protocol.put_msg(root, path))
-                        verb = "add" if change_type == Change.added else "upd"
-                        console.print(f"[cyan]{verb}[/cyan]    [dim]{rel}[/dim]")
-                    except (ValueError, OSError):
-                        pass
+
+                    if change_type == Change.deleted:
+                        # Send delete regardless of filters (the file was already there)
+                        try:
+                            rel = path.relative_to(root).as_posix()
+                            await ws.send(protocol.delete_msg(root, path))
+                            console.print(f"[red]del[/red]    [dim]{rel}[/dim]")
+                        except ValueError:
+                            pass
+                    else:
+                        # Added or modified
+                        if not path.is_file():
+                            continue
+                        if not filt.should_sync(path):
+                            continue
+                        try:
+                            rel = path.relative_to(root).as_posix()
+                            await ws.send(protocol.put_msg(root, path))
+                            verb = "add" if change_type == Change.added else "upd"
+                            console.print(f"[cyan]{verb}[/cyan]    [dim]{rel}[/dim]")
+                        except (ValueError, OSError):
+                            pass
+
+        watch_task = asyncio.create_task(watch_loop())
+        close_task = asyncio.create_task(ws.wait_closed())
+
+        done, pending = await asyncio.wait(
+            [watch_task, close_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in pending:
+            task.cancel()
+
+        if close_task.done():
+            raise ws.connection_closed_exc()
+        elif watch_task.done():
+            await watch_task
 
 
 async def _initial_sync(ws, root: Path, filt: FileFilter) -> None:

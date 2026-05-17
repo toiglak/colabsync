@@ -114,6 +114,20 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
         LINK_FILE.unlink(missing_ok=True)
         STATUS_FILE.unlink(missing_ok=True)
         
+        # Gracefully handle stop signals (SIGTERM/SIGINT) to clean up files and connections
+        loop = asyncio.get_running_loop()
+        main_task = asyncio.current_task()
+        
+        def handle_signal():
+            main_task.cancel()
+            
+        try:
+            loop.add_signal_handler(signal.SIGTERM, handle_signal)
+            loop.add_signal_handler(signal.SIGINT, handle_signal)
+        except (NotImplementedError, ValueError, RuntimeError):
+            # Not implemented on Windows or if run in a secondary thread
+            pass
+
         server_task = asyncio.create_task(srv.serve())
         
         tunnel_proc = None
@@ -137,7 +151,7 @@ def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
 
     try:
         asyncio.run(run_all())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 
 
