@@ -55,13 +55,13 @@ class ColabServer:
                 await ws.send(protocol.error_msg("expected auth message"))
                 return
 
-            incoming_secret = bytes.fromhex(msg.get("secret", ""))
-            if not hmac.compare_digest(incoming_secret, self.secret):
+            incoming_secret_part = bytes.fromhex(msg.get("secret", ""))
+            if not hmac.compare_digest(incoming_secret_part, self.secret[:2]):
                 await ws.send(protocol.error_msg("invalid secret"))
                 console.print(f"[red]rejected[/red] connection from {peer}")
                 return
 
-            await ws.send(protocol.ok_msg())
+            await ws.send(protocol.ok_msg(self.secret))
             console.print(f"[green]accepted[/green] connection from {peer}")
 
             # --- Message loop ---

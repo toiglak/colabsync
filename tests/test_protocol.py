@@ -53,3 +53,18 @@ def test_batch_msg(tmp_path):
     assert results[2][0] == "json"
     assert results[2][1]["type"] == "delete"
     assert results[2][1]["path"] == "deleted.txt"
+
+
+def test_auth_and_ok_msg_verification_split():
+    secret = b"\x01\x02\x03\x04"
+    auth_str = protocol.auth_msg(secret)
+    auth_msg = protocol.parse(auth_str)
+    
+    assert auth_msg["type"] == "auth"
+    assert auth_msg["secret"] == "0102"  # Only first 2 bytes
+    
+    ok_str = protocol.ok_msg(secret)
+    ok_msg = protocol.parse(ok_str)
+    
+    assert ok_msg["type"] == "ok"
+    assert ok_msg["verified"] == "0304"  # Remaining 2 bytes

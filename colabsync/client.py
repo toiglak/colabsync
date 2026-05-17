@@ -92,6 +92,16 @@ async def _connect_and_watch(
         if reply.get("type") != "ok":
             raise RuntimeError(f"Auth rejected: {reply.get('message', 'unknown')}")
 
+        # Verify server secret
+        server_verified_part = bytes.fromhex(reply.get("verified", ""))
+        if not hmac.compare_digest(server_verified_part, secret[2:]):
+            raise RuntimeError(
+                "SECURITY WARNING: Server verification failed!\n"
+                "The remote server did not present the correct verification token.\n"
+                "This could be a hijacked tunnel or a recycled Cloudflare tunnel address.\n"
+                "Disconnecting..."
+            )
+
         console.print("[green]connected[/green]  performing initial sync…")
 
         # --- Initial full sync ---

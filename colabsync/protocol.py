@@ -33,7 +33,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def auth_msg(secret: bytes) -> str:
-    return json.dumps({"type": "auth", "secret": secret.hex()})
+    return json.dumps({"type": "auth", "secret": secret[:2].hex()})
 
 
 def put_msg(root: Path, path: Path) -> bytes:
@@ -52,8 +52,8 @@ def ping_msg() -> str:
     return json.dumps({"type": "ping"})
 
 
-def ok_msg() -> str:
-    return json.dumps({"type": "ok"})
+def ok_msg(secret: bytes) -> str:
+    return json.dumps({"type": "ok", "verified": secret[2:].hex()})
 
 
 def error_msg(message: str) -> str:
