@@ -74,15 +74,15 @@ def join(join_link: str, root: Path) -> None:
 @click.option("--_daemon", is_flag=True, hidden=True)
 def start(port: int, dest: Path, force: bool, _daemon: bool) -> None:
     """Start the colabsync server (Colab side)."""
-    if not _daemon:
-        _start_background(port, dest, force)
-        return
-
     # 1. Environment check
     in_colab = _is_colab()
     if not in_colab and not force:
         console.print("[red]error[/red] Not in Colab environment. Use [bold]--force[/bold] to override.")
         sys.exit(1)
+
+    if not _daemon:
+        _start_background(port, dest, force)
+        return
 
     # Check if already running
     if PID_FILE.exists():

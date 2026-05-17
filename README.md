@@ -1,6 +1,6 @@
 # `colabsync`
 
-Syncs a local repository into a running Google Colab session, live.
+Sync local changes into a running Google Colab session.
 
 The Colab VS Code extension handles the notebook file itself. colabsync handles everything else: source files, configs, scripts — whatever is in your repo. Changes appear in Colab the moment you save them locally.
 
