@@ -130,22 +130,8 @@ class FileFilter:
         due to the large-dir heuristic or the size limit.
         """
         path = path.resolve()
-        path_str = str(path)
-
-        # 1. .colabignore
-        if self._colab_matches and self._colab_matches(path_str):
+        if self._is_ignored(path):
             return False
-
-        # 2. git ignores
-        if self._git_matches(path_str):
-            return False
-
-        # 3. Large-dir heuristic – check every ancestor directory
-        for parent in path.parents:
-            if parent == self.root or not parent.is_relative_to(self.root):
-                break
-            if self._is_large_dir(parent):
-                return False
 
         # 4. File size
         try:
@@ -159,6 +145,10 @@ class FileFilter:
             return False
 
         return True
+
+    def should_sync_deleted(self, path: Path) -> bool:
+        """Return whether a missing path may be removed from the remote tree."""
+        return not self._is_ignored(path.resolve())
 
     def should_sync_dir(self, directory: Path) -> bool:
         """
@@ -178,6 +168,21 @@ class FileFilter:
 
     # ------------------------------------------------------------------
     # Internals
+
+    def _is_ignored(self, path: Path) -> bool:
+        path_str = str(path)
+
+        if self._colab_matches and self._colab_matches(path_str):
+            return True
+        if self._git_matches(path_str):
+            return True
+
+        for parent in path.parents:
+            if parent == self.root or not parent.is_relative_to(self.root):
+                break
+            if self._is_large_dir(parent):
+                return True
+        return False
 
     def _is_large_dir(self, directory: Path) -> bool:
         try:

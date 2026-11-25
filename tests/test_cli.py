@@ -1,22 +1,22 @@
-import pytest
-from click.testing import CliRunner
 from unittest import mock
+
+from click.testing import CliRunner
+
 from colabsync.cli import main
 
-def test_start_no_colab_no_force():
-    runner = CliRunner()
-    # Mock _is_colab to return False, mimicking local machine
-    with mock.patch("colabsync.cli._is_colab", return_value=False):
-        result = runner.invoke(main, ["start"])
-        assert result.exit_code == 1
-        assert "Not in Colab environment. Use --force to override." in result.output
 
-def test_start_force_bypasses_colab_check():
-    runner = CliRunner()
-    # Mock _is_colab to return False, but pass --force
-    # We mock _start_background so it doesn't actually try to run the daemon process
-    with mock.patch("colabsync.cli._is_colab", return_value=False), \
-         mock.patch("colabsync.cli._start_background") as mock_start_bg:
-        result = runner.invoke(main, ["start", "--force"])
-        assert result.exit_code == 0
-        mock_start_bg.assert_called_once()
+def test_session_is_required():
+    result = CliRunner().invoke(main, [])
+
+    assert result.exit_code == 2
+    assert "Missing option" in result.output
+    assert "--session" in result.output
+
+
+def test_cli_runs_sync_for_selected_session(tmp_path):
+    with mock.patch("colabsync.cli.shutil.which", return_value="/usr/local/bin/colab"), \
+        mock.patch("colabsync.cli.run_client", new_callable=mock.AsyncMock) as run:
+        result = CliRunner().invoke(main, ["--session", "dev", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    run.assert_awaited_once_with(tmp_path.resolve(), "dev")

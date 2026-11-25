@@ -1,70 +1,95 @@
 # `colabsync`
 
-Sync local changes into a running Google Colab session.
+Sync local files into a running Google Colab session. No GitHub push/pull, no
+manual uploads, and no Colab-side server or tunnel setup.
 
-The Colab VS Code extension handles the notebook file itself. colabsync handles everything else: source files, configs, scripts — whatever is in your repo. Changes appear in Colab the moment you save them locally.
-
-No GitHub push/pull. No manual uploads. No `chore: sync` commits.
+The Colab VS Code extension handles the notebook file itself. `colabsync`
+handles everything else: source files, configs, scripts, and other files in
+your local repository. Changes appear in Colab after you save them locally.
 
 ## How it works
 
-1. You run a setup cell in Colab that installs cloudflared, starts a small WebSocket server, and opens a Cloudflare Quick Tunnel to expose it.
-2. The cell prints a join link.
-3. You run `colabsync <join-link>` locally. It performs an initial full sync, then watches for file changes using your OS's native file-change notifications.
+`colabsync` uses the official Colab CLI's one-shot SSH command for every batch:
 
-Changes flow one way: local to Colab. Persistent outputs (checkpoints, datasets) live in mounted Google Drive and are never touched by this tool.
-
-## Colab setup
-
-Paste this into Colab terminal and run it:
-
-```python
-uvx git+https://github.com/toiglak/colabsync.git start
+```text
+colab ssh -s <session> -- python3
 ```
 
-It will print something like:
+It pipes a generated Python script to that command. The script writes files
+under `/content`, supports binary data, and removes only files that
+`colabsync` previously synchronized. Each operation is serialized, so changes
+that arrive during an SSH transfer remain queued. A failed transfer is retried;
+after the connection returns, `colabsync` reconciles the current local tree
+before applying queued changes.
+
+## Setup and usage
+
+Install both CLIs:
 
 ```sh
-colabsync cs1_aHR0cHM6Ly9...
-```
-
-## Local usage
-
-Install:
-
-```sh
+uv tool install google-colab-cli
 uv tool install git+https://github.com/toiglak/colabsync.git
 ```
 
-Run, pointing at the root of the repository you want to sync:
+Create or select a Colab session with the Colab CLI. A session name makes the
+target unambiguous:
 
 ```sh
-colabsync cs1_aHR0cHM6Ly9...
+colab new -s dev
 ```
 
-Or with an explicit root:
+From the local repository root, start the watcher:
 
 ```sh
-colabsync join colabsync_... --root ~/projects/myrepo
+colabsync --session dev
 ```
 
-colabsync keeps running and reconnects automatically if the connection drops. Stop it with Ctrl-C.
+Use `--root` when the repository is elsewhere:
+
+```sh
+colabsync --session dev --root ~/projects/myrepo
+```
+
+If your SSH private key is passphrase-protected and is not loaded in an SSH
+agent, pass it through to the Colab CLI:
+
+```sh
+colabsync --session dev --identity ~/.ssh/id_ed25519
+```
+
+`colabsync` performs an initial synchronization, reports transfer and
+connection status, and keeps watching until Ctrl-C. Stop the runtime when you
+are finished:
+
+```sh
+colab stop -s dev
+```
 
 ## What gets synced
 
-colabsync filters files using the same rules as git, plus a few extras:
+`colabsync` uses the existing file watcher and ignore filtering rules:
 
-- **`.gitignore`** — global and all local `.gitignore` files are respected.
-- **`.colabignore`** — an optional file in your repo root, same syntax as `.gitignore`. Use it to exclude the notebook itself or any other files you don't want pushed.
-- **Large directories** — any directory with 100+ entries is skipped automatically. If it isn't already covered by `.gitignore`, a warning is printed reminding you to add it.
+- **`.gitignore`** — global and local Git ignore rules are respected.
+- **`.colabignore`** — an optional repository-root ignore file with Gitignore
+  syntax.
+- **Large directories** — directories with 100 or more entries are skipped,
+  with a warning when Git does not already ignore them.
 - **Large files** — individual files over 2 MB are skipped and logged.
+
+Ignored files are never written or removed remotely. Remote-only files and
+runtime-generated artifacts are preserved because reconciliation does not
+delete paths that were not owned by this sync process.
 
 A typical `.colabignore`:
 
-```
-# Don't push the notebook — the Colab extension handles that
+```text
+# The Colab extension handles the notebook.
 my_experiment.ipynb
 ```
+
+Changes flow one way: local to Colab. Persistent outputs such as checkpoints
+and datasets should live in mounted Google Drive or another remote-managed
+location.
 
 ## License
 
